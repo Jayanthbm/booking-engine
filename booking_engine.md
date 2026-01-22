@@ -15,346 +15,645 @@ Allows users to search room availability based on selected dates, view pricing, 
 ### Entity: Permission
 
 - Purpose / Role
-  - Represents a specific action that can be performed in the system
-  - Fine-grained control over what a user can or cannot do
+  - Represents a single atomic action that can be performed in the system
+  - Enables fine-grained authorization independent of roles
 
 - Attributes
   - id → unique identifier
-  - name → unique permission name (e.g., ADD_HOTEL, EDIT_HOTEL)
-  - description → optional description of what the permission allows
+  - name → unique, immutable permission name
+      - Format: RESOURCE_ACTION (e.g., HOTEL_CREATE, BOOKING_CANCEL)
+  - description → optional human-readable description
   - created_at, updated_at → timestamps
+  - is_system → boolean
+      - Marks core permissions that cannot be modified or deleted
 
 - Example Permissions
-  - ADD_USER, EDIT_USER, DELETE_USER, VIEW_USER
-  - ADD_HOTEL, EDIT_HOTEL, DELETE_HOTEL, VIEW_HOTEL
-  - ADD_ROOM_TYPE, EDIT_ROOM_TYPE, DELETE_ROOM_TYPE
-  - ADD_ROOM, EDIT_ROOM, DELETE_ROOM
-  - CREATE_BOOKING, EDIT_BOOKING, CANCEL_BOOKING, DELETE_BOOKING
-  - ADD_ADDON, EDIT_ADDON, DELETE_ADDON
-  - PROCESS_PAYMENT, REFUND_PAYMENT, VIEW_TRANSACTIONS
+  - USER_CREATE, USER_EDIT, USER_DELETE, USER_VIEW
+  - HOTEL_CREATE, HOTEL_EDIT, HOTEL_DELETE, HOTEL_VIEW
+  - ROOM_TYPE_CREATE, ROOM_TYPE_EDIT, ROOM_TYPE_DELETE
+  - ROOM_CREATE, ROOM_EDIT, ROOM_DELETE
+  - BOOKING_CREATE, BOOKING_EDIT, BOOKING_CANCEL
+  - ADDON_CREATE, ADDON_EDIT, ADDON_DELETE
+  - PAYMENT_PROCESS, PAYMENT_REFUND, TRANSACTION_VIEW
 
 - Functionalities / Behaviors
-  - Create, update, delete permissions (by SUPERADMIN)
-  - Assign permissions to roles
+  - Create, update, delete permissions (SUPERADMIN only)
+  - Assign permissions to roles via RolePermission mapping
+  - Permissions are not assigned directly to users
+  - All authorization checks resolve through roles
 
 - Constraints / Rules
-  - name should be unique
-  - Cannot delete if assigned to a role
+  - name must be globally unique
+  - Permission cannot be deleted if:
+      - Assigned to any role
+      - Marked as is_system = true
+  - Permission names should be treated as immutable once in use
 
 ### Entity: Role
 
 - Purpose / Role
-  - Groups a set of permissions into a role for users
-  - Allows easy assignment of permissions
+  - Groups a set of permissions into a role
+  - Simplifies permission assignment and authorization checks
 
 - Attributes
   - id → unique identifier
-  - name → role name (e.g., SUPERADMIN, ADMIN, RECEPTIONIST)
+  - name → unique, immutable role name
+      - Examples: SUPERADMIN, ADMIN, RECEPTIONIST
   - description → optional description
+  - is_active → boolean
+      - Determines whether the role can be assigned or used
   - created_at, updated_at → timestamps
 
 - Relationships / Join Tables
-  - RolePermission: role_id, permission_id
+  - RolePermission
+      - role_id
+      - permission_id
 
 - Functionalities / Behaviors
-  - Create, update, delete roles (SUPERADMIN)
-  - Assign/remove permissions
+  - Create, update, delete roles (SUPERADMIN only)
+  - Assign / remove permissions from roles
+  - Activate / deactivate roles (is_active)
+  - Users with inactive roles:
+      - Authentication is denied at login
+      - Tokens are not issued
 
 - Default Roles
-  - SUPERADMIN → full access, all permissions
-  - ADMIN → access to hotels, rooms, add-ons, bookings
-  - RECEPTIONIST → limited to bookings and guest management
+  - SUPERADMIN
+      - full access
+      - Cannot be deactivated or deleted
+  - ADMIN
+      - Manage hotels, rooms, add-ons, bookings
+  - RECEPTIONIST
+      - Limited to bookings and guest handling
+
+- Constraints / Rules
+  - Default roles are system roles
+  - Cannot be deleted
+  - Permissions can be modified only with caution
+  - name must be unique
+  - Role cannot be deleted if:
+      - Assigned to any user
+      - Marked as system/default role
+  - SUPERADMIN role:
+      - Cannot be renamed
+      - Cannot be deactivated
 
 ### Entity: User
 
 - Purpose / Role
   - Represents a system user (admin, receptionist, or staff)
-  - Used for login, auditing, and action permissions
+  - Used for authentication, authorization, auditing, and operational actions
 
 - Attributes
   - id → unique identifier
-  - username → unique login name
-  - password → hashed and salted
+  - username → unique, immutable login name
+  - password → hashed & salted (never stored in plain text)
   - email → unique email address
-  - mobile → optional mobile number
-  - role_id → reference to the user's role
+  - mobile → optional, unique mobile number
+  - role_id → reference to assigned Role
+  - is_active → boolean
+  - last_login_at → timestamp (nullable)
+  - failed_login_attempts → integer (default 0)
+  - locked_until → timestamp (nullable)
   - created_at, updated_at → timestamps
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Login, 2FA, password reset
-  - Create, update, or delete users (by SUPERADMIN)
+  - Login with password verification
+  - Optional 2FA for privileged users
+  - Password reset (token-based, time-limited)
+  - Create, update, activate/deactivate users (SUPERADMIN only)
   - Perform actions based on role permissions
-  - Track who performed actions on entities
+  - All user actions are auditable
 
 - Constraints / Rules
   - username should be unique
+  - email must be unique
+  - mobile and email combined should be unique
   - Users cannot delete themselves
-  - Every action in system should be auditable to user_id
+  - Inactive users cannot log in
+  - Users assigned to inactive roles cannot log in
+  - Password resets invalidate existing sessions
+  - Every privileged action is auditable to user_id
 
 ### Entity: Hotel / Resort
 
 - Purpose / Role
   - Represents the property (hotel or resort) where rooms are located
-  - Can store basic details like name, location, contact info
-  - Acts as a parent for Rooms, Room Types, Pricing, and Bookings
+  - Stores core property details used for booking, pricing, and communication
+  - Acts as the parent for Rooms, Room Types, Pricing, Policies, and Bookings
 
 - Attributes
   - id → unique identifier
-  - name → hotel or resort name
+  - name → unique, immutable hotel or resort name
   - address → street, city, state, country
   - description → optional text about the property
-  - contact_email / contact_phone → for guest/admin communication
-  - images → optional gallery URLs
+  - contact_email → primary contact email
+  - contact_phone → primary contact phone
+  - timezone → string
+  - check_in_time → time (e.g., 14:00)
+  - check_out_time → time (e.g., 11:00)
+  - currency → ISO currency code (e.g., INR, USD)
+  - images → optional gallery URL
+  - is_active → boolean
   - created_at, updated_at → timestamps
-  - created_by_user_id → references User who created it
-  - updated_by_user_id → references User who last updated it
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Create, update, or delete a hotel
-  - Retrieve hotel details (for admin or API)
-  - Associate Rooms, Room Types, and Pricing with the hotel
+  - Create, update, activate/deactivate a hotel
+  - Retrieve hotel details (admin & public APIs)
+  - Associate rooms, room types, pricing rules, taxes, and policies
+  - Prevent new bookings if hotel is inactive
 
 - Constraints / Rules
-  - Hotel name should be unique
-  - address should be complete for booking display
-  - Cannot delete a hotel if rooms or bookings exist (referential integrity)
+  - name must be unique
+  - Address must be complete for booking display
+  - Inactive hotels:
+      - Cannot accept new bookings
+      - Existing bookings remain unaffected
+  - Hotel cannot be deleted if:
+      - Rooms exist
+      - Bookings exist
+  - Prefer soft delete over hard delete
 
 ### Entity: Room Type
 
 - Purpose / Role
-  - Represents a category of rooms in the hotel (e.g., Deluxe, Suite, Standard)
-  - defines shared characteristics among rooms (like bed type, capacity, amenities)
-  - Serves as the basis for pricing, availability, and bookings
+  - Represents a category of rooms within a hotel (e.g., Deluxe, Suite, Standard)
+  - Defines shared characteristics such as capacity, bed type, and amenities
+  - Serves as the primary unit for pricing, availability, and booking rules
 
 - Attributes
   - id → unique identifier
-  - hotel_id → reference to the parent hotel/resort
-  - name → e.g., Deluxe, Suite
-  - description → optional text about features of this room type
-  - max_adults → maximum number of adults allowed in one room
-  - max_children → maximum number of children allowed in one room
+  - hotel_id → reference to parent Hotel / Resort
+  - name → room type name (unique within hotel)
+  - description → optional description
+  - max_adults → maximum number of adults per room
+  - max_children → maximum number of children per room
+  - base_price → numeric
   - bed_type → single, double, king, queen, etc.
-  - amenities → list/JSON of amenities (Wi-Fi, AC, TV, etc.)
+  - amenities → list / JSON of amenities (Wi-Fi, AC, TV, etc.)
+  - is_active → boolean
   - created_at, updated_at → timestamps
   - created_by_user_id → references User who created it
   - updated_by_user_id → references User who last updated it
 
 - Functionalities / Behaviors
-  - Create, update, or delete a room type
-  - Retrieve room type details (for admin or API)
-  - Enforce booking limits for adults and children
+  - Create, update, activate/deactivate room types
+  - Retrieve room type details (admin & public APIs)
+  - Enforce adult & child capacity limits during booking
   - Associate rooms under this type
-  - Assign default pricing or seasonal pricing rules
+  - Apply pricing via Pricing Engine (base + seasonal + age-based)
 
 - Constraints / Rules
-  - Room type name should be unique within a hotel
-  - Capacity must be >0
-  - Cannot delete a room type if rooms or bookings exist under it
-  - Bookings must not exceed max_adults or max_children per room
+  - (hotel_id, name) must be unique
+  - max_adults + max_children > 0
+  - base_price ≥ 0
+  - Inactive room types:
+      - Cannot accept new bookings
+      - Existing bookings remain valid
+  - Room type cannot be deleted if:
+      - Rooms exist
+      - Bookings exist
+  - Prefer soft delete over hard delete
 
 ### Entity: Room
 
 - Purpose / Role
-  - Represents an individual room within a hotel or resort
-  - Tied to a Room Type, which defines its capacity, bed type, and amenities
-  - Tracks availability, status, and bookings for each individual room
+  - Represents an individual physical room within a hotel or resort
+  - Inherits capacity, bed type, and amenities from its Room Type
+  - Acts as the atomic unit of availability for bookings
 
 - Attributes
   - id → unique identifier
-  - hotel_id → reference to the parent hotel/resort
-  - room_type_id → reference to the room type
-  - room_number → the physical room number or code
-  - floor → optional floor number for reference
-  - status → e.g., Available, Maintenance, Out of Service
+  - hotel_id → reference to parent Hotel / Resort
+  - room_type_id → reference to Room Type
+  - room_number → physical room number or code
+  - floor → optional floor reference
+  - status → enum
+        - Available
+        - Maintenance
+        - Out of Service
+  - is_active → boolean
+  - notes → optional text
   - created_at, updated_at → timestamps
   - created_by_user_id → references User who created it
   - updated_by_user_id → references User who last updated it
 
 - Functionalities / Behaviors
-  - Create, update, or delete a room
+  - Create, update, activate/deactivate rooms
   - Assign room to a Room Type
-  - Track room availability and maintenance status
-  - Retrieve room details during search and booking
-  - Enforce room limits based on associated Room Type (max adults/children)
+  - Mark room as unavailable via status or availability calendar
+  - Retrieve room details for admin and booking flows
+  - Enforce capacity limits via associated Room Type
 
 - Constraints / Rules
-  - Room number should be unique within a hotel
-  - Room cannot be deleted if it has active bookings
-  - Status must reflect availability accurately for search and booking
+  - (hotel_id, room_number) must be unique
+  - Room cannot be deleted if:
+      - Any booking exists (past or future)
+  - If status ≠ Available:
+      - RoomAvailability records must not allow booking
+  - Inactive rooms:
+      - Cannot accept new bookings
+      - Existing bookings remain unaffected
+  - Prefer soft delete over hard delete
 
 ### Entity: Hotel Add-on
 
 - Purpose / Role
-  - Optional extras tied to the hotel or specific room types
-  - Examples: Breakfast, Extra Bed, Spa, Late Checkout
-  - Can have base price and seasonal/date-specific pricing
+  - Represents optional services or extras provided by a hotel
+  - Can apply globally to all room types or be restricted to specific room types
+  - Participates in pricing, discounts, taxes, and bookings
 
 - Attributes
   - id → unique identifier
-  - hotel_id → reference to the parent hotel/resort
-  - room_type_id → reference to the room type; can be null (NULL = applies to all rooms)
-  - name → Name of the add-on
-  - description → Optional text about the add-on
-  - base_price → Base price for the add-on
-  - per_guest -> True if price is per guest, false if per booking
-  - created_at, updated_at → timestamps
+  - hotel_id → reference to parent Hotel / Resort
+  - room_type_id → reference to Room Type (nullable)
+      - NULL ⇒ applies to all room types
+  - name → add-on name (unique per hotel)
+  - description → optional description
+  - base_price → numeric
+  - per_guest → boolean
+      - true ⇒ price × number of guests
+      - false ⇒ price × booking
+  - is_active → boolean
+  - max_quantity → integer (nullable)
+     - Limits how many times the add-on can be selected per booking
   - images → optional gallery URLs
-  - created_by_user_id → references User who created it
-  - updated_by_user_id → references User who last updated it
+  - created_at, updated_at → timestamps
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Create, update, delete hotel add-ons
-  - Associate with room types if needed
-  - Display valid add-ons for room selection during booking
-  - Price can be overridden by AddOnPricing table for seasonal/date-specific pricing
+  - Create, update, activate/deactivate hotel add-ons
+  - Associate add-ons with room types (optional)
+  - Show only valid, active add-ons during booking
+  - Pricing resolved via Pricing Engine:
+      - Base price
+      - Seasonal / dynamic pricing
+      - Age-based pricing (if applicable)
 
 - Constraints / Rules
-  - name should be unique per hotel
-  - Base price ≥ 0
-  - Cannot delete if associated with bookings
+  - (hotel_id, name) must be unique
+  - base_price ≥ 0
+  - max_quantity > 0 (if specified)
+  - Inactive add-ons:
+      - Cannot be selected for new bookings
+      - Existing bookings remain unaffected
+  - Add-on cannot be deleted if:
+      - Linked to any booking
+  - Prefer soft delete over hard delete
 
 ### Entity: Activity / Experience Add-on
 
 - Purpose / Role
-  - Optional experiences or services not tied directly to hotel rooms
-  - Examples: Jungle Safari, Visit to Nearby Falls, City Tour
-  - Can have base price and seasonal pricing
-  - Optional association to a hotel/resort if the activity is property-specific
+  - Represents optional experiences or services not directly tied to hotel rooms
+  - Can be hotel-specific or global (usable across hotels)
+  - Participates in pricing, discounts, taxes, and bookings
 
 - Attributes
   - id → unique identifier
-  - name → Name of the add-on
-  - description → Optional text about the add-on
-  - base_price → Base price for the add-on
-  - per_guest -> True if price is per guest, false if per booking
-  - hotel_id → Optional reference to hotel/resort
-  - created_at, updated_at → timestamps
+  - name → activity name
+  - description → optional description
+  - base_price → numeric
+  - per_guest → boolean
+      - true ⇒ price × number of guests
+      - false ⇒ price × booking
+  - hotel_id → optional reference to Hotel / Resort
+        - NULL ⇒ global activity
+  - is_active → boolean
+        - Controls whether activity is selectable for new bookings
+  - max_quantity → integer (nullable)
+     - Limits how many times the activity can be selected per booking
   - images → optional gallery URLs
-  - created_by_user_id → references User who created it
-  - updated_by_user_id → references User who last updated it
+  - created_at, updated_at → timestamps
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Create, update, delete activities
-  - Associate with bookings
-  - Price can have seasonal or date-specific overrides via AddOnPricing table
+  - Create, update, activate/deactivate activities
+  - Associate activities with bookings
+  - Display only valid, active activities during booking
+  - Pricing resolved via Pricing Engine:
+      - Base price
+      - Seasonal / dynamic pricing
+      - Age-based pricing (if applicable)
 
 - Constraints / Rules
-  - name should be unique
-  - Base price ≥ 0
-  - Cannot delete if linked to active bookings
+  - name must be unique per scope:
+      - Global activities: unique globally
+      - Hotel-specific activities: unique per hotel
+  - base_price ≥ 0
+  - max_quantity > 0 (if specified)
+  - Inactive activities:
+      - Cannot be selected for new bookings
+      - Existing bookings remain unaffected
+  - Activity cannot be deleted if:
+      - Linked to any booking
+  - Prefer soft delete over hard delete
 
 ### Entity: Dynamic / Seasonal Pricing
 
 - Purpose / Role
-  - Handles seasonal or date-specific pricing for Room Types, Hotel Add-ons, or Activity/Experience Add-ons
-  - Examples: Holiday rate for Extra Bed, peak-season Jungle Safari tickets, weekend room rates
-  - Ensures non-ambiguous pricing by preventing overlapping date ranges
+  - Defines date-specific price overrides for:
+      - Rooms or Add-ons
+      - Hotel Add-ons
+      - Activity / Experience Add-ons
+  - Ensures deterministic pricing by enforcing non-overlapping date ranges
+  - Acts as a pure pricing rule, not a transactional record
 
 - Attributes
   - id → unique identifier
-  - entity_type → Enum: RoomType, HotelAddOn, ActivityAddOn
-  - entity_id → reference to the specific add-on or room type
-  - start_date → start date for the seasonal pricing
-  - end_date → end date for the seasonal pricing
-  - price → price for this period
-  - notes → optional description or reason for this dynamic pricing
+  - entity_type → Enum
+      - RoomType
+      - HotelAddOn
+      - ActivityAddOn
+  - entity_id → reference to target entity
+  - start_date → start date (inclusive)
+  - end_date → end date (exclusive)
+      - Prevents off-by-one errors
+  - price → numeric
+      - Overrides base price for this period
+  - priority → integer
+      - Resolves conflicts if multiple rules technically apply
+  - is_active → boolean
+      - Allows temporary disabling without deletion
+  - notes → optional explanation
   - created_at, updated_at → timestamps
-  - created_by_user_id → references User who created it
-  - updated_by_user_id → references User who last updated it
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Create, update, delete seasonal/dynamic pricing for rooms or add-ons
-  - Retrieve price for a specific date range during booking
-  - Enforce non-overlapping date ranges to avoid ambiguity
-  - Automatically override the base price for the entity during applicable dates
+  - Create, update, activate/deactivate pricing rules
+  - Pricing Engine selects highest-priority active rule for given date
+  - Applies price override during booking price calculation
+  - Supports future seasonal pricing without impacting existing bookings
 
 - Constraints / Rules
   - price ≥ 0
   - start_date < end_date
-  - Date ranges for the same entity must not overlap
-  - Cannot delete if linked to active bookings
+  - For same (entity_type, entity_id):
+      - Active date ranges must not overlap
+  - Inactive pricing rules are ignored
+  - Pricing rule cannot be deleted if:
+      - Used by any existing booking price breakdown
+  - Prefer soft delete over hard delete
+
+### Entity: Age-Based / Child Pricing
+
+- Purpose / Role
+  - Defines price adjustments based on guest age for:
+      - Room Types
+      - Hotel Add-ons
+      - Activity / Experience Add-ons
+  - Enables child-specific discounts or free pricing
+  - Acts as a pricing rule, not a transactional record
+
+- Attributes
+  - id → unique identifier
+  - entity_type → Enum
+        - RoomType
+        - HotelAddOn
+        - ActivityAddOn
+  - entity_id → reference to target entity
+  - age → integer (Represents the maximum age this rule applies to)
+  - price_factor → numeric
+        - 0.0 ⇒ free
+        - 0.5 ⇒ 50% of base price
+        - 1.0 ⇒ no change
+  - is_active → boolean
+  - notes → optional explanation
+  - created_at, updated_at → timestamps
+  - created_by_user_id, updated_by_user_id → references User
+
+- Functionalities / Behaviors
+  - Pricing Engine selects rule using:
+      - Highest age ≤ child’s age
+      - Rule must be active
+  - Applies price factor to:
+      - Room price (if applicable)
+      - Add-on price (if applicable)
+  - Supports different child pricing across entities
+
+- Constraints / Rules
+  - age ≥ 0
+  - price_factor ≥ 0 AND ≤ 1
+  - For same (entity_type, entity_id):
+      - Only one rule per age
+  - Inactive rules are ignored
+  - Rule cannot be deleted if:
+      - Used in any existing booking price breakdown
+  - Prefer soft delete over hard delete
+
+### Entity: TaxRule
+
+- Purpose / Role
+  - Defines tax rules applicable to bookings, rooms, or add-ons
+  - Supports government taxes (GST), service charges, or local/city taxes
+  - Ensures taxes are applied deterministically and transparently
+
+- Attributes
+  - id → unique identifier
+  - hotel_id → reference to Hotel / Resort
+  - tax_name → name of the tax
+  - tax_type → Enum
+      - Percentage
+      - Fixed
+  - tax_value → numeric
+      - Percentage (e.g., 12.0 for 12%)
+      - Fixed amount (e.g., 200)
+  - applicable_on → enum
+      - Room
+      - HotelAddOn
+      - ActivityAddOn
+      - Total
+  - start_date → start date (inclusive)
+  - end_date → end date (nullable)
+      - NULL = tax applies indefinitely
+  - is_active → boolean
+  - notes → optional description
+  - created_at, updated_at → timestamps
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
+
+- Functionalities / Behaviors
+
+  - Create, update, activate/deactivate tax rules
+  - Pricing Engine applies all active tax rules that:
+      - Match hotel
+      - Match applicability
+      - Are valid for booking dates
+  - Taxes are calculated:
+      - After discounts
+      - Before final total is stored
+  - Applied tax values are stored in booking price_breakdown
+
+- Constraints / Rules
+  - tax_value ≥ 0
+  - start_date < end_date (if end_date exists)
+  - Multiple tax rules may apply simultaneously
+      - Taxes are additive, not exclusive
+  - Inactive tax rules are ignored
+  - Tax rules cannot be deleted if:
+      - Referenced in any booking price breakdown
+  - Prefer soft delete over hard delete
 
 ### Entity: Coupon
 
 - Purpose / Role
-  - Represents a discount code that can be applied to bookings.
+  - Represents a promotional discount that can be applied to a booking
+  - Supports percentage-based discounts with clear validity and usage limits
 
 - Attributes
   - id → unique identifier
-  - code → unique coupon code (e.g., “NEWYEAR50”)
-  - description → optional description of the promotion
-  - discount_percentage → discount to apply (0–100)
-  - start_date → start date for the coupon
-  - end_date → end date for the coupon
-  - minimum_spend → minimum spend required to apply the coupon
-  - is_active → True if the coupon is currently active
-  - usage_limit → max number of times coupon can be used; -1 = unlimited
+  - code → unique, immutable coupon code
+      - Case-insensitive (stored normalized, e.g., uppercase)
+  - description → optional promotion description
+  - discount_type → enum
+      - Percentage
+      - Fixed
+  - discount_value → numeric
+      - Percentage (0–100)
+      - Fixed amount (e.g., 500)
+  - max_discount_amount → numeric (nullable)
+      - Caps discount for percentage coupons
+  - start_date → start date (inclusive)
+  - end_date → end date (exclusive)
+  - minimum_spend → numeric
+  - is_active → boolean
+  - usage_limit → integer
+      - -1 = unlimited
+  - usage_count → integer
   - created_at, updated_at → timestamps
-  - created_by_user_id → references User who created it
+  - created_by_user_id → references User
 
 - Functionalities / Behaviors
-  - Create, update, delete coupons
-  - Validate coupon for bookings (active date, usage limit)
-  - Apply discount to total booking price
+  - Create, update, activate/deactivate coupons
+  - Validate coupon during booking:
+      - Active
+      - Within date range
+      - Usage limit not exceeded
+      - Minimum spend satisfied
+  - Pricing Engine applies discount:
+      - Before tax calculation
+      - Discount stored in price breakdown
 
 - Constraints / Rules
-  - code should be unique
-  - discount_percentage should be between 0 and 100
+  - code must be unique and immutable
+  - discount_value ≥ 0
+  - Percentage discount ≤ 100
   - start_date < end_date
-  - Cannot delete coupon if already used in bookings
-  - minimum_spend should be positive
+  - minimum_spend ≥ 0
+  - Coupon cannot be deleted if:
+      - Used in any booking
+  - Inactive coupons:
+      - Cannot be applied to new bookings
+  - Prefer soft delete over hard delete
 
-### Entity: BookingCoupon (join table)
+### Entity: RoomAvailability
 
 - Purpose / Role
-  - Tracks which bookings have used which coupons.
+  - Represents the date-level availability of an individual room
+  - Acts as the single source of truth for booking safety
+  - Prevents overbooking through transactional database locking
 
 - Attributes
   - id → unique identifier
-  - booking_id → reference to the booking
-  - coupon_id → reference to the coupon
-  - discount_amount → actual discount applied in this booking
+  - room_id → reference to Room
+  - date → calendar date
+  - is_booked → boolean
+      - true ⇒ room is reserved for this date
+  - booking_id → reference to Booking (nullable)
+      - Populated only when is_booked = true
   - created_at, updated_at → timestamps
 
 - Functionalities / Behaviors
-  - Record coupon usage per booking
-  - Enforce coupon usage limits
+  - Availability records are created:
+      - At booking time (inside DB transaction)
+      - Or pre-generated per room per date
+  - Booking creation flow:
+      1. Start DB transaction
+      2. Lock availability rows (SELECT … FOR UPDATE)
+      3. Ensure all requested dates are free
+      4. Mark rows as booked and link booking_id
+      5. Commit transaction
+  - Cancellation flow:
+      - Marks associated availability rows as free
+      - Removes booking_id reference
 
 - Constraints / Rules
-  - A coupon cannot be used more than its usage_limit (unless -1)
+  - (room_id, date) must be unique
+  - A room cannot be booked if:
+      - is_booked = true
+      - Room status ≠ Available
+      - Room is inactive
+  - Availability records are append-safe:
+      - Never deleted once used
+      - Freed by setting is_booked = false
+  - RoomAvailability must not be modified outside a transaction
 
 ### Entity: Booking
 
 - Purpose / Role
-  - Represents a reservation made by a guest for a hotel/resort. Tracks rooms, add-ons, guest details, payments, discounts, and invoice.
+  - Represents a confirmed or pending reservation made by a guest
+  - Acts as the central transactional record linking:
+      - Room availability
+      - Pricing rules
+      - Add-ons
+      - Taxes
+      - Payments and refunds
 
 - Attributes
   - id → unique identifier
-  - hotel_id → reference to the hotel/resort
-  - room_type_id → reference to the room type
-  - room_id → reference to the room
-  - check_in_date → booking start date
-  - check_out_date → booking end date
+  - hotel_id → reference to Hotel / Resort
+  - room_type_id → reference to Room Type
+  - room_id → reference to Room
+
+  - check_in_date → start date (inclusive)
+  - check_out_date → end date (exclusive)
   - num_adults → number of adults
   - num_children → number of children
-  - guest_name → name of the guest
-  - guest_email → optional email for notifications
+
+  - guest_name → guest name
+  - guest_email → optional email
   - guest_phone → contact number
-  - booked_by → Enum: Guest, Receptionist
-  - base_room_price → room base price (before dynamic pricing)
-  - total_room_price → final room price after seasonal/dynamic pricing
-  - hotel_addons_total → total cost of selected hotel add-ons
-  - activity_addons_total → total cost of selected activity/experience add-ons
-  - total_discount → total discount applied (including coupon or promotions)
+
+  - booked_by → enum
+      - Guest
+      - Receptionist
+  - status → Enum:
+      - Pending
+      - Confirmed
+      - Cancelled
+      -  Completed
+    - status_changed_at
+    - status_reason
+
+  - base_room_price → base price per night at booking time
+  - room_price_total → total room price after dynamic pricing
+  - hotel_addons_total → total hotel add-ons price
+  - activity_addons_total → total activity add-ons price
+  - tax_total → total tax applied
+  - total_discount → total discount applied
   - total_price → final price after discount
-  - coupon_code → optional applied coupon code
-  - invoice → reference to invoice number or file
-  - payment_mode → Enum: Cash, Card, UPI, Other
-  - payment_status → Enum: Pending, Advance Paid, Fully Paid, Refunded
-  - status → Enum: Pending, Confirmed, Cancelled, Completed
+  - total_price → final payable amount
+  - price_breakdown → JSON (Stores full calculation trace)
+
+  - coupon_code → applied coupon code (nullable)
+  - invoice_number → generated invoice reference
+  - invoice_url → optional invoice file URL
+
+  - payment_status → Enum
+      - Pending
+      - Partially Paid
+      - Fully Paid
+      - Refunded
+
   - created_at, updated_at → timestamps
-  - created_by_user_id → references User who created it can be null
-  - updated_by_user_id → references User who last updated it can be null
+  - created_by_user_id → references User (nullable for guest)
+  - updated_by_user_id → references User
 
 - Relationships / Join Tables
   - BookingHotelAddOn → booking to hotel add-ons
@@ -362,113 +661,231 @@ Allows users to search room availability based on selected dates, view pricing, 
   - BookingCoupon → booking to coupon(s)
 
 - Functionalities / Behaviors
-  - Create/update/cancel bookings
-  - Apply dynamic, age-based, seasonal pricing
-  - Apply taxes, discounts, promotions, and coupons
-  - Validate room capacity
-  - Handle waitlists and overbooking
-  - Generate invoice and track coupon usage
-  - Track notifications
+  - Create booking inside a DB transaction:
+      1. Lock RoomAvailability rows
+      2. Validate capacity
+      3. Calculate price via Pricing Engine
+      4. Persist booking + availability
+  - Update booking:
+      - Allowed only in Pending or Confirmed
+      - Triggers full price recalculation
+  - Cancel booking:
+      - Updates status
+      - Frees RoomAvailability
+      - Applies CancellationPolicy
+      - Initiates refunds if needed
+  - Complete booking:
+      - Marks stay finished
+      - Becomes immutable
 
 - Constraints / Rules
   - check_in_date < check_out_date
-  - num_adults ≤ room type max adults
-  - num_children ≤ room type max children
-  - cannot delete or update if booking status is Completed
-  - Add-ons and dynamic pricing must be valid for the booking dates
+  - num_adults ≤ room_type.max_adults
+  - num_children ≤ room_type.max_children
+  - Booking cannot be modified if:
+      - status = Completed
+      - status = Cancelled
+  - Booking cannot exist without:
+      - Valid RoomAvailability rows
+  - Pricing rules, coupons, and taxes must be valid for booking dates
+  - Booking cannot be hard-deleted
+      - Use status + audit logs
+
+### Entity: BookingCoupon (join table)
+
+- Purpose / Role
+  - Records the application of a coupon to a specific booking
+  - Acts as the historical source of truth for coupon usage and discount amounts
+
+- Attributes
+  - id → unique identifier
+  - booking_id → reference to Booking
+  - coupon_id → reference to Coupon
+  - coupon_code → string
+    - Snapshot of the coupon code at booking time
+  - discount_amount → numeric
+      - Final discount applied to this booking
+  - created_at, updated_at → timestamps
+
+- Functionalities / Behaviors
+  - Created only once per booking at booking confirmation
+  - Used to:
+      - Track coupon usage
+      - Enforce usage limits
+      - Generate reports and audits
+  - Coupon application flow:
+      1. Validate coupon
+      2. Calculate discount via Pricing Engine
+      3. Store applied discount in BookingCoupon
+      4. Increment coupon usage count
+
+- Constraints / Rules
+  - (booking_id, coupon_id) must be unique
+  - A booking cannot apply the same coupon more than once
+  - Coupon usage must not exceed usage_limit (unless -1)
+  - BookingCoupon cannot be deleted or modified once created
+      - Coupon history must remain immutable
 
 ### Entity: Payment
 
 - Purpose / Role
-  - Tracks payments made for bookings
+  - Represents a single monetary attempt or transaction against a booking
+  - Tracks how much money was attempted, collected, or failed
+  - Serves as the authoritative source for payment mode and gateway interaction
+
 
 - Attributes
   - id → unique identifier
-  - booking_id → reference to the booking
-  - amount → payment amount
-  - payment_date → date/time of payment
-  - payment_mode → Enum: Cash, Card, UPI, Other
-  - payment_status → Enum: Pending, Completed, Failed
-  - transaction_id → optional transaction reference from payment gateway
+  - booking_id → reference to Booking
+
+  - amount → numeric
+  - payment_mode → enum
+      - Cash
+      - Card
+      - UPI
+      - Wallet
+      - Bank Transfer
+      - Other
+   - payment_status → enum
+      - Pending
+      - Completed
+      - Failed
+  - payment_date → timestamp
+    - Time at which payment was completed (nullable until success)
+
+  - transaction_id → string (nullable)
+      - Reference from payment gateway
+      - Must be unique per gateway (if present)
+
+  - gateway_name → string
+  - gateway_response → JSON
+
   - created_at, updated_at → timestamps
+  - created_by_user_id
 
 - Functionalities / Behaviors
-  - Record payments, track status, validate payment success
-  - Integrate with payment gateways
+  - A payment record is created when:
+    - User initiates a payment attempt
+  - Payment lifecycle:
+    1. Created with Pending
+    2. Updated to Completed or Failed
+    3. Never deleted or reused
+  - Booking payment_status is derived from:
+      - Sum of Completed payments
+      - Compared against booking total_price
 
 - Constraints / Rules
-  - Payment amount > 0
-  - Cannot delete payments linked to active bookings
+  - amount > 0
+  - transaction_id must be unique (if present)
+  - Payment records are immutable after completion:
+    - Amount, mode, and booking_id cannot change
+  - Payments cannot be deleted, regardless of booking state
+  - Refunds are handled only via Refund entity
+    - Never modify Payment amount for refunds
 
 ### Entity: Refund
 
 - Purpose / Role
-  - Tracks refunds for bookings or payments
+  - Represents a monetary reversal of a completed payment
+  - Tracks refund attempts, outcomes, and reasons
+  - Works in conjunction with Payment and Transaction for full financial traceability
 
 - Attributes
   - id → unique identifier
-  - payment_id → reference to the payment
-  - amount → refund amount
-  - refund_date → date/time of refund
-  - status → Enum: Pending, Completed, Failed
-  - reason → optional explanation for refund
+  - payment_id → reference to Payment
+      - Refunds are always tied to a specific payment
+
+  - amount → numeric (Amount being refunded)
+  - status → enum
+      - Pending
+      - Completed
+      - Failed
+  - refund_date → timestamp (nullable)
+    - Populated only when refund is successfully completed
+  - reason → optional explanation
+
+  - refund_transaction_id → string (nullable)
+      - Reference from payment gateway
+  - gateway_response → JSON (nullable)
+      - Raw refund response for audit/debug
+
   - created_at, updated_at → timestamps
+  - created_by_user_id → references User (nullable for system-initiated refunds)
 
 - Functionalities / Behaviors
-  - Initiate refunds for cancelled bookings or errors
-  - Track refund processing status
+  - Refund lifecycle:
+    1. Created with Pending
+    2. Processed via payment gateway (if applicable)
+    3. Updated to Completed or Failed
+  - Refunds:
+      - May be partial or full
+      - Multiple refunds may exist for a single payment
+  - Booking payment status is recalculated based on:
+      - Completed payments
+      - Completed refunds
 
 - Constraints / Rules
-  - amount ≤ original payment amount
-  - Cannot delete refund once completed
+  - amount > 0
+  - amount ≤ remaining refundable amount of the payment
+  - Refund cannot be modified after:
+      - status = Completed
+  - Refunds cannot be deleted under any circumstance
+  - Payment amount is never modified during refund
+    - Refunds are separate financial records
 
 ### Entity: Transaction
 
 - Purpose / Role
-  - Records all financial transactions, including payments, refunds, and adjustments
-  - Useful for audit and reporting
+  - Represents an immutable financial ledger entry
+  - Records all money movement related to bookings:
+      - Payments, refunds and Manual adjustments
+  - Serves as the single source of truth for financial reporting and audits
 
 - Attributes
   - id → unique identifier
   - booking_id → optional reference
   - payment_id → optional reference
   - refund_id → optional reference
-  - amount → positive or negative
-  - transaction_type → Enum: Payment, Refund, Adjustment
-  - transaction_date → date/time of transaction
-  - created_at, updated_at → timestamps
+
+   - transaction_type → enum
+      - Payment
+      - Refund
+      - Adjustment
+  - amount → numeric
+      - Positive for incoming money
+      - Negative for outgoing money
+  - currency → string
+      - Should match Booking currency
+  - transaction_date → timestamp
+      - Time the transaction is recorded
+
+  - notes → optional text
+      - Reason for adjustment or context
+
+  - created_at → timestamp
+  - created_by_user_id → references User (nullable for system-generated entries)
 
 - Functionalities / Behaviors
-  - Track all money movement for accountability
+  - Automatically created when:
+    - Payment is completed → Payment transaction
+    - Refund is completed → Refund transaction
+  - Manual adjustments:
+    - Created only by authorized users
+    - Must include notes
+  - Used for:
+    - Financial reporting
+    - Reconciliation
+    - Audits
 
 - Constraints / Rules
-  - Amount must match linked payment/refund if applicable
-
-### Entity: Age-Based / Child Pricing
-
-- Purpose / Role
-  - Defines price adjustments based on age for Room Types, Hotel Add-ons, or Activity/Experience Add-ons
-  - Example:
-    - Room: 0–1 year free, 2–5 years 50% price
-    - Breakfast add-on: 0–1 year free, 2–5 years 20%
-
-- Attributes
-  - id → unique identifier
-  - entity_type → Enum: RoomType, HotelAddOn, ActivityAddOn
-  - entity_id → reference to the specific room type or add-on
-  - age → age in years for which this pricing applies
-  - price_factor → multiplier (0 = free, 0.2 = 20%, etc.)
-  - notes → optional description or reason for this age-based pricing
-  - created_at, updated_at → timestamps
-  - created_by_user_id, updated_by_user_id → references User
-
-- Functionalities / Behaviors
-  - Apply age-based price factor to room or add-on during booking
-  - Lookup based on child’s age (highest age ≤ child’s age)
-  - Works for both rooms and add-ons
-
-- Constraints / Rules
-  - age ≥ 0
-  - price_factor ≥ 0 and ≤ 1
-  - Only one rule per age per entity
-  - Cannot delete if linked to active bookings
+  - amount ≠ 0
+  - If transaction_type = Payment:
+    - payment_id must be present
+    - amount > 0
+  - If transaction_type = Refund:
+    - refund_id must be present
+    - amount < 0
+  - If transaction_type = Adjustment:
+    - Either sign allowed
+    - notes required
+  - Transaction cannot be updated or deleted
