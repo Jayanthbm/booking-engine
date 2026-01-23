@@ -889,3 +889,232 @@ Allows users to search room availability based on selected dates, view pricing, 
     - Either sign allowed
     - notes required
   - Transaction cannot be updated or deleted
+
+### Entity: CancellationPolicy
+
+- Purpose / Role
+  - Defines deterministic refund rules when a booking is cancelled
+  - Ensures consistent refund behavior across bookings
+  - Removes ad-hoc or manual refund decisions
+
+- Attributes
+  - id → unique identifier
+  - hotel_id → reference to Hotel / Resort
+
+  - hours_before_checkin → numeric
+  - refund_percentage → numeric
+  - is_active → boolean
+  - priority → integer
+
+  - start_date → start date (inclusive)
+  - end_date → end date (nullable)
+
+  - notes → optional explanation
+  - created_at, updated_at → timestamps
+  - created_by_user_id → references User
+  - updated_by_user_id → references User
+
+- Functionalities / Behaviors
+  - Applied when a booking is cancelled:
+      1. Calculate hours between current time and hotel check-in time
+      2. Select the best matching active policy:
+          - Same hotel
+          - Valid date range
+          - Highest hours_before_checkin ≤ actual_hours
+          - Highest priority if needed
+      3. Calculate refundable amount
+      4. Trigger Refund(s) accordingly
+  - Refund calculation uses:
+      - Amount already paid
+      - Policy refund_percentage
+      - Never exceeds paid amount
+
+- Constraints / Rules
+  - hours_before_checkin ≥ 0
+  - refund_percentage ≥ 0 AND ≤ 100
+  - For same hotel_id:
+      - Multiple policies allowed
+      - Policies must not conflict logically
+      - Priority resolves ambiguity
+  - Inactive policies are ignored
+  - Policies cannot be deleted if:
+      - Referenced by any completed cancellation
+  - Prefer soft delete over hard delete
+
+### Entity: IdempotencyKey
+
+- Purpose / Role
+  - Ensures idempotent behavior for critical write operations
+  - Prevents duplicate execution of the same request due to:
+      - Network retries
+      - Client timeouts
+      - Accidental double submissions
+  - Commonly used for:
+      - Booking creation
+      - Payment initiation
+      - Refund initiation
+
+- Attributes
+  - id → unique identifier
+  - key → unique idempotency key
+  - scope → enum
+      - Booking
+      - Payment
+      - Refund
+  - request_hash → string
+      - Hash of request payload
+      - Ensures same key is not reused with different data
+  - response_snapshot → JSON (nullable)
+
+  - status → enum
+      - InProgress
+      - Completed
+      - Failed
+  - resource_id → integer (nullable)
+      - ID of created resource (booking_id, payment_id, refund_id)
+
+  - expires_at → timestamp
+      - Key automatically expires after safe duration
+
+  - created_at, updated_at → timestamps
+
+
+- Functionalities / Behaviors
+  - Client sends Idempotency-Key header for critical POST requests
+  - Server flow:
+      1. Look up key + scope
+      2. If Completed → return stored response
+      3. If InProgress → reject or wait
+      4. If not found → create with InProgress
+      5. Execute operation
+      6. Store result and mark Completed
+
+- Constraints / Rules
+  - key must be unique per scope
+  - Same key cannot be reused with different request_hash
+  - IdempotencyKey rows:
+      - Are never updated after Completed except expiry
+      - Can be safely cleaned up after expires_at
+  - Keys are mandatory for:
+      - Booking creation
+      - Payment creation
+      - Refund initiation
+
+### Entity: AuditLog
+
+- Purpose / Role
+  - Records who did what, when, and where in the system
+  - Provides a tamper-resistant audit trail for:
+      - Security
+      - Compliance
+      - Debugging
+      - Operational accountability
+  - Captures state-changing actions only (not read-only events)
+
+- Attributes
+  - id → unique identifier
+
+  - user_id → references User
+      - NULL for system or guest-initiated actions
+
+  - actor_type → enum
+      - User
+      - Guest
+      - System
+
+  - action → string
+      - Examples: CREATE_BOOKING, UPDATE_BOOKING, DELETE_BOOKING,APPLY_COUPON
+
+  - entity_type → string
+      - Examples: Booking, Payment, Refund
+
+  - entity_id → integer
+      - ID of affected entity
+
+  - before_state → JSON
+  - after_state → JSON
+
+  - ip_address → string
+  - user_agent → string
+  - request_id → string
+
+  - created_at → timestamp
+
+- Functionalities / Behaviors
+
+  - Automatically created for:
+    - All CREATE / UPDATE / DELETE operations
+    - Authentication events (login, logout, failed login)
+    - Permission or access denials
+    - Financial actions (payment, refund)
+
+  - Written
+    - Inside the same DB transaction as the action (where possible)
+    - Or immediately after successful commit
+
+- Constraints / Rules
+    - Audit logs:
+      - Cannot be updated
+      - Cannot be deleted
+    - Sensitive data must:
+        - Be masked
+        - Or omitted entirely
+    - AuditLog writes must never block core business logic
+
+### Entity: Notification
+
+- Purpose / Role
+  - Represents a message or alert sent to a user or guest
+  - Supports system notifications without requiring message queues
+  - Provides delivery tracking and retry visibility
+
+- Attributes
+  - id → unique identifier
+  - recipient_type → enum
+      - User
+      - Guest
+
+  - recipient_user_id → reference to User (nullable)
+  - recipient_email → string (nullable)
+  - recipient_phone → string (nullable)
+
+  - channel → enum
+      - Email
+      - SMS
+      - Push
+      - Whatsapp
+      - Telegram
+
+  - template_key → string
+      - Example: BOOKING_CONFIRMED, PAYMENT_FAILED
+
+  - title → string (nullable)
+  - message → text
+  - payload → JSON (nullable)
+  - status -> enum
+      - Pending
+      - Sent
+      - Failed
+
+  - retry_count → integer
+  - last_attempt_at → timestamp
+
+  - entity_type → string
+      - Examples: Booking, Payment, Refund
+  - entity_id → integer
+
+  - created_at, updated_at → timestamps
+
+- Functionalities / Behaviors
+
+  - Created when:
+    - Booking confirmed / cancelled
+    - Payment completed / failed
+    - Refund processed
+
+  - Delivery:
+    - Attempted synchronously or via lightweight background job
+    - Retried up to configured limit
+
+  - Notification failure:
+    - Must not block core business logic
