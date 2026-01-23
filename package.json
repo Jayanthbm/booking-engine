@@ -9,7 +9,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest tests/integration/ --runInBand",
+    "test:coverage": "jest --coverage"
   },
   "repository": {
     "type": "git",
@@ -22,7 +23,7 @@
   },
   "homepage": "https://github.com/Jayanthbm/booking-engine#readme",
   "dependencies": {
-    "@prisma/client": "^7.3.0",
+    "@prisma/client": "^6.0.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
@@ -32,13 +33,18 @@
     "joi": "^18.0.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^9.0.1",
     "winston": "^3.19.0",
     "xss-clean": "^0.1.4"
   },
   "devDependencies": {
     "eslint": "^9.39.2",
+    "jest": "^30.2.0",
     "nodemon": "^3.1.11",
     "prettier": "^3.8.1",
-    "prisma": "^7.3.0"
+    "prisma": "^6.0.0",
+    "supertest": "^7.2.2"
   }
 }

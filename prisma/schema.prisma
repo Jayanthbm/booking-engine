@@ -7,4 +7,619 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-import "./models/index.prisma"
+model Booking {
+  id                 Int                    @id @default(autoincrement())
+  hotelId            Int
+  roomTypeId         Int
+  roomId             Int
+
+  checkInDate        DateTime
+  checkOutDate       DateTime
+  numAdults          Int
+  numChildren        Int
+
+  guestName          String
+  guestEmail         String?
+  guestPhone         String?
+
+  bookedBy           BookedBy
+  status             BookingStatus          @default(Pending)
+  statusChangedAt    DateTime?
+  statusReason       String?
+
+  baseRoomPrice      Decimal
+  roomPriceTotal     Decimal
+  hotelAddonsTotal   Decimal
+  activityAddonsTotal Decimal
+  subtotalPrice      Decimal
+  taxTotal           Decimal
+  totalDiscount      Decimal
+  totalPrice         Decimal
+
+  priceBreakdown     Json
+  couponCode         String?
+
+  invoiceNumber      String?
+  invoiceUrl         String?
+
+  paymentStatus      BookingPaymentStatus   @default(Pending)
+
+  hotel              Hotel      @relation(fields: [hotelId], references: [id])
+  roomType           RoomType   @relation(fields: [roomTypeId], references: [id])
+  room               Room       @relation(fields: [roomId], references: [id])
+
+  payments           Payment[]
+  coupons            BookingCoupon[]
+  hotelAddons        BookingHotelAddon[]
+  activityAddons     BookingActivityAddon[]
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  @@index([hotelId])
+  @@index([roomId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([checkInDate, checkOutDate])
+}
+model AgeBasedPricing {
+  id         Int               @id @default(autoincrement())
+  entityType PricingEntityType
+  entityId   Int
+  age        Int
+  priceFactor Decimal
+  isActive   Boolean           @default(true)
+  notes      String?
+
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  createdByUserId Int?
+  updatedByUserId Int?
+  
+  createdBy  User?             @relation("AgePricingCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy  User?             @relation("AgePricingUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  @@unique([entityType, entityId, age])
+  @@index([entityType, entityId])
+}
+model User {
+  id                   Int       @id @default(autoincrement())
+  username             String    @unique
+  password             String
+  email                String    @unique
+  mobile               String?   @unique
+  isActive             Boolean   @default(true)
+  lastLoginAt          DateTime?
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime?
+
+  roleId               Int?
+  role                 Role?     @relation(fields: [roleId], references: [id])
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  createdByUserId      Int?
+  updatedByUserId      Int?
+
+  createdBy            User?     @relation("UserCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy            User?     @relation("UserUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  auditLogs            AuditLog[]
+  createdUsers         User[]    @relation("UserCreatedBy")
+  updatedUsers         User[]    @relation("UserUpdatedBy")
+
+  createdTaxRules      TaxRule[] @relation("TaxCreatedBy")
+  updatedTaxRules      TaxRule[] @relation("TaxUpdatedBy")
+  createdCoupons       Coupon[]
+  
+  createdDynamicPricings DynamicPricing[] @relation("DynamicPricingCreatedBy")
+  updatedDynamicPricings DynamicPricing[] @relation("DynamicPricingUpdatedBy")
+  createdAgePricings     AgeBasedPricing[] @relation("AgePricingCreatedBy")
+  updatedAgePricings     AgeBasedPricing[] @relation("AgePricingUpdatedBy")
+  createdPolicies        CancellationPolicy[] @relation("PolicyCreatedBy")
+  updatedPolicies        CancellationPolicy[] @relation("PolicyUpdatedBy")
+
+  @@index([roleId])
+  @@index([isActive])
+}
+model Payment {
+  id             Int           @id @default(autoincrement())
+  bookingId      Int
+  amount         Decimal
+  paymentMode    PaymentMode?
+  paymentStatus  PaymentStatus @default(Pending)
+  paymentDate    DateTime?
+  transactionId  String?
+  gatewayName    String?
+  gatewayResponse Json?
+
+  booking        Booking       @relation(fields: [bookingId], references: [id])
+
+  refunds        Refund[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+   @@index([bookingId])
+   @@index([paymentStatus])
+}
+model RolePermission {
+  roleId       Int
+  permissionId Int
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+model DynamicPricing {
+  id         Int               @id @default(autoincrement())
+  entityType PricingEntityType
+  entityId   Int
+  startDate  DateTime
+  endDate    DateTime
+  price      Decimal
+  priority   Int               @default(0)
+  isActive   Boolean           @default(true)
+  notes      String?
+
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdBy  User?             @relation("DynamicPricingCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy  User?             @relation("DynamicPricingUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([startDate, endDate])
+  @@index([isActive])
+}
+model Permission {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+}
+model RoomAvailability {
+  id        Int      @id @default(autoincrement())
+  roomId    Int
+  date      DateTime
+  isBooked  Boolean @default(false)
+  bookingId Int?
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, date])
+  @@index([date])
+  @@index([roomId, isBooked])
+}
+model Room {
+  id          Int        @id @default(autoincrement())
+  hotelId    Int
+  roomTypeId Int
+  roomNumber String
+  floor       String?
+  status      RoomStatus @default(Available)
+  isActive    Boolean    @default(true)
+  notes       String?
+
+  hotel       Hotel      @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomType    RoomType   @relation(fields: [roomTypeId], references: [id])
+
+  availability RoomAvailability[]
+  bookings     Booking[]
+
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([hotelId, roomNumber])
+  @@index([roomTypeId])
+  @@index([hotelId])
+  @@index([status])
+}
+model IdempotencyKey {
+  id               Int               @id @default(autoincrement())
+  key              String
+  scope            IdempotencyScope
+  requestHash      String
+  responseSnapshot Json?
+  status           String
+  resourceId       Int?
+  expiresAt        DateTime
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([key, scope])
+  @@index([status])
+  @@index([expiresAt])
+}
+model RoomType {
+  id          Int       @id @default(autoincrement())
+  hotelId    Int
+  name        String
+  description String?
+  maxAdults   Int
+  maxChildren Int
+  basePrice   Decimal
+  bedType     String?
+  amenities   Json
+  isActive    Boolean   @default(true)
+
+  hotel       Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  hotelAddons HotelAddon[]
+  bookings    Booking[]
+  rooms       Room[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([hotelId, name])
+  @@index([hotelId])
+  @@index([isActive])
+}
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  permissions RolePermission[]
+}
+model Transaction {
+  id              Int             @id @default(autoincrement())
+  bookingId       Int?
+  paymentId       Int?
+  refundId        Int?
+  transactionType TransactionType
+  amount          Decimal
+  currency        String
+  transactionDate DateTime        @default(now())
+  notes           String?
+
+  createdAt       DateTime        @default(now())
+
+
+  @@index([bookingId])
+  @@index([paymentId])
+  @@index([refundId])
+  @@index([transactionType])
+}
+model ActivityAddon {
+  id          Int       @id @default(autoincrement())
+  hotelId    Int?
+  name        String
+  description String?
+  basePrice   Decimal
+  perGuest    Boolean   @default(false)
+  maxQuantity Int?
+  isActive    Boolean   @default(true)
+  images      String[]
+
+  hotel       Hotel?    @relation(fields: [hotelId], references: [id])
+  bookings    BookingActivityAddon[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([hotelId, name])
+}
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int?
+  actorType   String
+  action      String
+  entityType  String?
+  entityId    Int?
+  beforeState Json?
+  afterState  Json?
+  ipAddress   String?
+  userAgent   String?
+  requestId   String?
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+model Hotel {
+  id            Int       @id @default(autoincrement())
+  name          String    @unique
+  address       String
+  description   String?
+  contactEmail  String?
+  contactPhone  String?
+  timezone      String?
+  checkInTime   DateTime?
+  checkOutTime  DateTime?
+  currency      String?
+  images        String[]
+  isActive      Boolean   @default(true)
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  rooms         Room[]
+  roomTypes     RoomType[]
+  hotelAddons   HotelAddon[]
+  bookings      Booking[]
+  activityAddons ActivityAddon[]
+  taxRules      TaxRule[]
+  cancellationPolicies CancellationPolicy[]
+
+  @@index([isActive])
+}
+model Notification {
+  id                Int                 @id @default(autoincrement())
+  recipientType     String
+  recipientUserId   Int?
+  recipientEmail    String?
+  recipientPhone    String?
+  channel           NotificationChannel
+  templateKey       String?
+  title             String?
+  message           String
+  payload           Json?
+  status            NotificationStatus  @default(Pending)
+  retryCount        Int                 @default(0)
+  lastAttemptAt     DateTime?
+  entityType        String?
+  entityId          Int?
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt])
+}
+model Refund {
+  id                 Int           @id @default(autoincrement())
+  paymentId          Int
+  amount             Decimal
+  status             PaymentStatus @default(Pending)
+  refundDate         DateTime?
+  reason             String?
+  refundTransactionId String?
+  gatewayResponse    Json?
+
+  payment            Payment       @relation(fields: [paymentId], references: [id])
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+enum BookingStatus {
+  Pending
+  Confirmed
+  Cancelled
+  Completed
+}
+
+enum BookingPaymentStatus {
+  Pending
+  PartiallyPaid
+  FullyPaid
+  Refunded
+}
+
+enum PaymentStatus {
+  Pending
+  Completed
+  Failed
+}
+
+enum PaymentMode {
+  Cash
+  Card
+  UPI
+  Wallet
+  BankTransfer
+  Other
+}
+
+enum RoomStatus {
+  Available
+  Maintenance
+  OutOfService
+}
+
+enum BookedBy {
+  Guest
+  Receptionist
+}
+
+enum TransactionType {
+  Payment
+  Refund
+  Adjustment
+}
+
+enum PricingEntityType {
+  RoomType
+  HotelAddOn
+  ActivityAddOn
+}
+
+enum TaxType {
+  Percentage
+  Fixed
+}
+
+enum TaxApplicableOn {
+  Room
+  HotelAddOn
+  ActivityAddOn
+  Total
+}
+
+enum IdempotencyScope {
+  Booking
+  Payment
+  Refund
+}
+
+enum NotificationChannel {
+  Email
+  SMS
+  Push
+  Whatsapp
+  Telegram
+}
+
+enum NotificationStatus {
+  Pending
+  Sent
+  Failed
+}
+model HotelAddon {
+  id          Int       @id @default(autoincrement())
+  hotelId    Int
+  roomTypeId Int?
+  name        String
+  description String?
+  basePrice   Decimal
+  perGuest    Boolean   @default(false)
+  maxQuantity Int?
+  isActive    Boolean   @default(true)
+  images      String[]
+
+  hotel       Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomType    RoomType? @relation(fields: [roomTypeId], references: [id])
+  bookings    BookingHotelAddon[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([hotelId, name])
+}
+
+model TaxRule {
+  id              Int             @id @default(autoincrement())
+  hotelId         Int
+  taxName         String
+  taxType         TaxType
+  taxValue        Decimal
+  applicableOn    TaxApplicableOn
+  startDate       DateTime
+  endDate         DateTime?
+  isActive        Boolean         @default(true)
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  createdByUserId Int?
+  updatedByUserId Int?
+
+  createdBy User? @relation("TaxCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy User? @relation("TaxUpdatedBy", fields: [updatedByUserId], references: [id])
+  hotel     Hotel @relation(fields: [hotelId], references: [id])
+
+  @@index([hotelId])
+  @@index([isActive])
+}
+
+model CancellationPolicy {
+  id                Int       @id @default(autoincrement())
+  hotelId           Int
+  hoursBeforeCheckIn Int
+  refundPercentage  Decimal
+  isActive          Boolean   @default(true)
+  priority          Int       @default(0)
+  startDate         DateTime
+  endDate           DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdByUserId   Int?
+  updatedByUserId   Int?
+
+  hotel             Hotel     @relation(fields: [hotelId], references: [id])
+  createdBy         User?     @relation("PolicyCreatedBy", fields: [createdByUserId], references: [id])
+  updatedBy         User?     @relation("PolicyUpdatedBy", fields: [updatedByUserId], references: [id])
+
+  @@index([hotelId])
+  @@index([isActive])
+}
+
+model Coupon {
+  id                Int             @id @default(autoincrement())
+  code              String          @unique
+  description       String?
+  discountType      TaxType         // Reusing TaxType enum (Percentage/Fixed) or create new enum? TaxType has Percentage/Fixed. Coupon has Percentage/Fixed. Compatible.
+  discountValue     Decimal
+  maxDiscountAmount Decimal?
+  startDate         DateTime
+  endDate           DateTime
+  minimumSpend      Decimal         @default(0)
+  isActive          Boolean         @default(true)
+  usageLimit        Int             @default(-1)
+  usageCount        Int             @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  createdByUserId   Int?
+
+  createdBy         User?           @relation(fields: [createdByUserId], references: [id])
+  bookings          BookingCoupon[]
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model BookingCoupon {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int
+  couponId       Int
+  couponCode     String
+  discountAmount Decimal
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id])
+  coupon  Coupon  @relation(fields: [couponId], references: [id])
+
+  @@unique([bookingId, couponId])
+}
+
+model BookingHotelAddon {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int
+  addonId        Int
+  quantity       Int      @default(1)
+  unitPrice      Decimal
+  totalPrice     Decimal
+  
+  booking        Booking     @relation(fields: [bookingId], references: [id])
+  addon          HotelAddon  @relation(fields: [addonId], references: [id])
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([bookingId])
+}
+
+model BookingActivityAddon {
+  id             Int      @id @default(autoincrement())
+  bookingId      Int
+  addonId        Int
+  quantity       Int      @default(1)
+  unitPrice      Decimal
+  totalPrice     Decimal
+  
+  booking        Booking       @relation(fields: [bookingId], references: [id])
+  addon          ActivityAddon @relation(fields: [addonId], references: [id])
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([bookingId])
+}
