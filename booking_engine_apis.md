@@ -1,305 +1,559 @@
----
-# Booking Engine – API List & Core Logic
+# Booking Engine – API Specification & Core Logic
+
+This document defines **all public and admin APIs**, their responsibilities, constraints, and cross-cutting rules.
+
+All APIs (except public search/login) require:
+
+* JWT authentication
+* Permission checks
+* Audit logging
+* Structured error responses
+
 ---
 
-## 1️⃣ Users
+## 🔐 Authentication & Session APIs
 
 ### 1.1 Login
 
-- Validate username and password.
-- Issue JWT token with role info.
-- Track login timestamp for auditing.
-- Handle failed login attempts (lockout if necessary).
+`POST /auth/login`
 
-### 1.2 Create User
+**Purpose**
 
-- Validate uniqueness of `username` and `email`.
-- Assign role to user (only SUPERADMIN can assign roles).
-- Hash and salt password.
-- Track `created_by_user_id`.
+* Authenticate user and issue JWT
 
-### 1.3 Update User
+**Logic**
 
-- Only SUPERADMIN can update roles.
-- Users cannot delete or modify themselves.
-- Track `updated_by_user_id`.
+* Validate username + password
+* Increment failed_login_attempts on failure
+* Lock account after configured threshold
+* Issue JWT with:
 
-### 1.4 Delete User
+  * user_id
+  * role_id
+  * permissions (optional claim)
+* Update `last_login_at`
 
-- Prevent deletion of self.
-- Prevent deletion if user created critical entities (hotels, room types, etc. – optional based on business logic).
+**Audit**
 
-### 1.5 List Users
-
-- Pagination, filtering by role.
-- Show associated role and permissions.
+* LOGIN_SUCCESS / LOGIN_FAILED
 
 ---
 
-## 2️⃣ Roles & Permissions
+### 1.2 Logout
 
-### 2.1 Create Role
+`POST /auth/logout`
 
-- Only SUPERADMIN.
-- Assign multiple permissions at creation.
-
-### 2.2 Update Role
-
-- Modify role name or assigned permissions.
-- Cannot delete if assigned to active users.
-
-### 2.3 Delete Role
-
-- Only if no users are assigned.
-- Prevent deletion of default roles (SUPERADMIN, ADMIN, RECEPTIONIST).
-
-### 2.4 List Roles
-
-- Include permissions associated.
-
-### 2.5 Assign/Remove Permissions to Role
-
-- Update RolePermission mapping.
-- Only SUPERADMIN can manage.
+* Stateless JWT logout (client-side discard)
+* Optional token blacklist (future)
 
 ---
 
-## 3️⃣ Hotels
+## 👤 Users Management
 
-### 3.1 Create Hotel
+### 2.1 Create User
 
-- Validate unique hotel name.
-- Track `created_by_user_id`.
-- Optional: validate address completeness.
+`POST /users`
 
-### 3.2 Update Hotel
+**Permission**
 
-- Update details including contact info and images.
-- Track `updated_by_user_id`.
+* `USER_CREATE`
 
-### 3.3 Delete Hotel
+**Rules**
 
-- Prevent deletion if rooms or bookings exist.
+* username, email, mobile must be unique
+* role must be active
+* Password hashed with bcrypt
+* Cannot assign SUPERADMIN unless caller is SUPERADMIN
 
-### 3.4 List Hotels
+**Audit**
 
-- Support filters: location, name, availability.
-- Pagination.
-
-### 3.5 Get Hotel Details
-
-- Include rooms, room types, add-ons, and dynamic pricing.
+* CREATE_USER
 
 ---
 
-## 4️⃣ Room Types & Rooms
+### 2.2 Update User
 
-### 4.1 Create Room Type
+`PUT /users/{id}`
 
-- Validate unique name per hotel.
-- Must have `max_adults` > 0.
-- Track creator and timestamps.
+**Permission**
 
-### 4.2 Update Room Type
+* `USER_EDIT`
 
-- Cannot exceed capacities of rooms/active bookings.
-- Track updater.
+**Rules**
 
-### 4.3 Delete Room Type
-
-- Prevent deletion if rooms or bookings exist.
-
-### 4.4 List Room Types
-
-- Include associated rooms and pricing.
-
-### 4.5 Create Room
-
-- Room number unique per hotel.
-- Associate with a Room Type.
-- Track creator.
-
-### 4.6 Update Room
-
-- Update status (Available, Maintenance, Out of Service).
-- Prevent updates that break capacity rules.
-
-### 4.7 Delete Room
-
-- Cannot delete if active bookings exist.
-
-### 4.8 List Rooms
-
-- Filter by hotel, room type, status.
-- Include availability info.
+* Cannot modify self role
+* Cannot activate/deactivate SUPERADMIN
+* Reset failed attempts on password change
 
 ---
 
-## 5️⃣ Add-ons
+### 2.3 Activate / Deactivate User
 
-### 5.1 Create Hotel Add-on
+`PATCH /users/{id}/status`
 
-- Name unique per hotel.
-- Base price ≥ 0.
-- Optional association to room types.
-- Track creator.
+**Permission**
 
-### 5.2 Update Hotel Add-on
+* `USER_EDIT`
 
-- Prevent breaking rules for active bookings.
+**Rules**
 
-### 5.3 Delete Hotel Add-on
-
-- Prevent deletion if linked to active bookings.
-
-### 5.4 List Hotel Add-ons
-
-- Filter by hotel or room type.
-
-### 5.5 Create Activity Add-on
-
-- Name unique.
-- Base price ≥ 0.
-- Optional hotel association.
-- Track creator.
-
-### 5.6 Update/Delete/List Activity Add-ons
-
-- Same constraints as hotel add-ons.
+* Inactive users cannot login
+* Existing sessions invalidated
 
 ---
 
-## 6️⃣ Dynamic / Seasonal Pricing
+### 2.4 List Users
 
-### 6.1 Create / Update / Delete Pricing
+`GET /users`
 
-- Entities: RoomType, HotelAddOn, ActivityAddOn.
-- Ensure non-overlapping date ranges per entity.
-- Price ≥ 0.
-- Cannot delete if linked to active bookings.
+**Features**
 
-### 6.2 List Pricing
-
-- Filter by entity type, date range.
+* Pagination
+* Filter by role, is_active
+* Include role + permissions
 
 ---
 
-## 7️⃣ Age-Based / Child Pricing
+## 🛡 Roles & Permissions
 
-### 7.1 Create / Update / Delete Age Pricing
+### 3.1 Create Role
 
-- Validate age ≥ 0.
-- Price factor between 0–1.
-- One rule per age per entity.
-- Cannot delete if linked to active bookings.
+`POST /roles`
 
-### 7.2 List Age Pricing
+**Permission**
 
-- Filter by entity type, entity_id.
+* `ROLE_CREATE`
+
+**Rules**
+
+* name immutable
+* Cannot create system roles via API
 
 ---
 
-## 8️⃣ Coupons
+### 3.2 Update Role
+
+`PUT /roles/{id}`
+
+**Permission**
+
+* `ROLE_EDIT`
+
+**Rules**
+
+* Cannot modify SUPERADMIN
+* Cannot deactivate role with active users
+
+---
+
+### 3.3 Assign Permissions
+
+`PUT /roles/{id}/permissions`
+
+**Permission**
+
+* `ROLE_ASSIGN_PERMISSION`
+
+---
+
+### 3.4 List Roles
+
+`GET /roles`
+
+* Include permissions
+* Include is_active
+
+---
+
+## 🏨 Hotels
+
+### 4.1 Create Hotel
+
+`POST /hotels`
+
+**Permission**
+
+* `HOTEL_CREATE`
+
+**Rules**
+
+* Name must be unique
+* Timezone & currency mandatory
+* is_active defaults to true
+
+---
+
+### 4.2 Update Hotel
+
+`PUT /hotels/{id}`
+
+**Permission**
+
+* `HOTEL_EDIT`
+
+---
+
+### 4.3 Activate / Deactivate Hotel
+
+`PATCH /hotels/{id}/status`
+
+**Rules**
+
+* Inactive hotels:
+
+  * No new bookings
+  * Existing bookings unaffected
+
+---
+
+### 4.4 List Hotels
+
+`GET /hotels`
+
+**Filters**
+
+* name
+* is_active
+* location (future)
+
+---
+
+### 4.5 Get Hotel Details
+
+`GET /hotels/{id}`
+
+* Includes:
+
+  * Room types
+  * Add-ons
+  * Active pricing rules
+  * Taxes
+
+---
+
+## 🛏 Room Types & Rooms
+
+### 5.1 Create Room Type
+
+`POST /room-types`
+
+**Permission**
+
+* `ROOM_TYPE_CREATE`
+
+**Rules**
+
+* base_price ≥ 0
+* capacity validation
+
+---
+
+### 5.2 Update Room Type
+
+`PUT /room-types/{id}`
+
+**Rules**
+
+* Cannot reduce capacity below existing bookings
+
+---
+
+### 5.3 Create Room
+
+`POST /rooms`
+
+**Rules**
+
+* Unique (hotel_id, room_number)
+
+---
+
+### 5.4 Update Room
+
+`PUT /rooms/{id}`
+
+**Rules**
+
+* Status change affects availability
+* Maintenance blocks bookings
+
+---
+
+### 5.5 List Rooms
+
+`GET /rooms`
+
+**Filters**
+
+* hotel_id
+* room_type_id
+* status
+* availability date range
+
+---
+
+## ➕ Add-ons & Activities
+
+### 6.1 Create Hotel Add-on
+
+`POST /hotel-addons`
+
+**Permission**
+
+* `ADDON_CREATE`
+
+---
+
+### 6.2 Create Activity Add-on
+
+`POST /activity-addons`
+
+---
+
+### 6.3 List Add-ons
+
+`GET /addons`
+
+**Filters**
+
+* hotel_id
+* room_type_id
+* is_active
+
+---
+
+## 📈 Pricing Rules
+
+### 7.1 Dynamic / Seasonal Pricing
+
+`POST /pricing/dynamic`
+
+**Rules**
+
+* No overlapping date ranges per entity
+* priority supported (v1 = 0)
+
+---
+
+### 7.2 Age-Based Pricing
+
+`POST /pricing/age-based`
+
+---
+
+### 7.3 Tax Rules
+
+`POST /pricing/tax`
+
+**Rules**
+
+* Taxes applied after discounts
+* Additive
+
+---
+
+### 7.4 List Pricing
+
+`GET /pricing`
+
+---
+
+## 🎟 Coupons
 
 ### 8.1 Create Coupon
 
-- Unique code.
-- Validate discount percentage 0–100.
-- Validate start/end dates.
-- Usage limit ≥ -1 (-1 = unlimited).
-- Track creator.
+`POST /coupons`
 
-### 8.2 Update / Delete Coupon
+**Rules**
 
-- Cannot delete if already used in bookings.
-- Update only allowed if usage hasn’t exceeded limit.
+* Code normalized (uppercase)
+* discount before tax
+* usage_limit enforced
+
+---
+
+### 8.2 Apply Coupon (Validation Only)
+
+`POST /coupons/validate`
+
+* Used during booking preview
+
+---
 
 ### 8.3 List Coupons
 
-- Filter by active/inactive, date range.
-
-### 8.4 Apply Coupon to Booking
-
-- Validate coupon is active and within usage limit.
-- Apply discount to booking’s `total_discount`.
-- Track usage in `BookingCoupon` table.
+`GET /coupons`
 
 ---
 
-## 9️⃣ Bookings
+## 📅 Availability & Search
 
-### 9.1 Create Booking
+### 9.1 Search Availability
 
-- Validate:
-  - Room availability.
-  - Max adults/children per room type.
-  - Add-ons and dynamic pricing for booking dates.
-  - Coupon validity if applied.
+`GET /availability/search`
 
-- Calculate:
-  - Base room price, dynamic pricing adjustments.
-  - Add-ons total.
-  - Age-based discounts.
-  - Total price and total discount.
+**Inputs**
 
-- Track:
-  - Booking creator (Guest / Receptionist)
-  - Coupon usage if applied.
-  - Invoice number.
+* hotel_id
+* check_in
+* check_out
+* guests
 
-### 9.2 Update Booking
+**Logic**
 
-- Partial updates allowed.
-- Cannot update Completed bookings.
-- Recalculate prices if any change affects totals (dates, room, add-ons, coupon).
-
-### 9.3 Cancel Booking
-
-- Update status to Cancelled.
-- Trigger refund if payment exists.
-
-### 9.4 List / Get Booking
-
-- Filters: hotel, date range, status, booked_by.
-- Include associated add-ons, coupon, and payment info.
+* Uses RoomAvailability
+* Read-only
+* No locks
 
 ---
 
-## 🔟 Payments
+## 📘 Bookings
 
-### 10.1 Create Payment
+### 10.1 Create Booking
 
-- Validate amount > 0.
-- Track payment status (Pending / Completed / Failed).
-- Associate with booking.
-- Integrate with payment gateway.
+`POST /bookings`
 
-### 10.2 Refund Payment
+**Idempotent**
 
-- Validate amount ≤ original payment.
-- Track refund status.
-- Update booking payment status if necessary.
+* Requires `Idempotency-Key`
 
-### 10.3 List Payments
+**Transaction Flow**
 
-- Filters: booking_id, date range, status.
+1. Lock RoomAvailability rows
+2. Validate capacity
+3. Resolve pricing:
 
----
-
-## 1️⃣1️⃣ Transactions
-
-### 11.1 List Transactions
-
-- Track all payments, refunds, adjustments.
-- Filter by booking, payment, or refund.
-- Include amount, type, and date.
+   * Base
+   * Dynamic
+   * Age-based
+   * Coupon
+   * Tax
+4. Persist booking + availability
+5. Create BookingCoupon (if applied)
 
 ---
 
-## ✅ Notes / Core Logic Across All APIs
+### 10.2 Update Booking
 
-- JWT authentication and role-based authorization required.
-- Audit logs: track `created_by_user_id` and `updated_by_user_id`.
-- Pagination and filtering for all list endpoints.
-- Validation at every step for capacity, availability, dates, coupon limits, and price rules.
-- Referential integrity enforced at DB level (cannot delete referenced entities).
+`PUT /bookings/{id}`
+
+**Rules**
+
+* Allowed only if status ∈ {Pending, Confirmed}
+* Triggers full price recalculation
+
+---
+
+### 10.3 Cancel Booking
+
+`POST /bookings/{id}/cancel`
+
+**v1 Behavior**
+
+* Refund amount entered manually
+* Future: CancellationPolicy auto-calculation
+
+---
+
+### 10.4 Get Booking
+
+`GET /bookings/{id}`
+
+* Includes:
+
+  * Add-ons
+  * Payments
+  * Refunds
+  * Price breakdown
+
+---
+
+### 10.5 List Bookings
+
+`GET /bookings`
+
+**Filters**
+
+* hotel_id
+* date range
+* status
+* booked_by
+
+---
+
+## 💳 Payments & Refunds
+
+### 11.1 Create Payment
+
+`POST /payments`
+
+**Idempotent**
+
+**Rules**
+
+* Amount > 0
+* Updates booking.payment_status
+
+---
+
+### 11.2 Refund Payment
+
+`POST /refunds`
+
+**Rules**
+
+* Partial refunds allowed
+* Cannot exceed refundable balance
+
+---
+
+### 11.3 List Payments / Refunds
+
+`GET /payments`
+`GET /refunds`
+
+---
+
+## 💰 Transactions (Ledger)
+
+### 12.1 List Transactions
+
+`GET /transactions`
+
+**Filters**
+
+* booking_id
+* date range
+* type
+
+---
+
+## 🔔 Notifications
+
+### 13.1 List Notifications
+
+`GET /notifications`
+
+---
+
+## 📜 Audit Logs
+
+### 14.1 List Audit Logs
+
+`GET /audit-logs`
+
+**Admin Only**
+
+---
+
+## ✅ Cross-Cutting Rules (Applies to ALL APIs)
+
+* JWT auth mandatory (except login/search)
+* Permission checks on every write API
+* Idempotency for critical writes
+* All writes wrapped in DB transactions
+* Audit logs are immutable
+* Soft deletes preferred
+* Errors are safe and non-leaky
+
+---
