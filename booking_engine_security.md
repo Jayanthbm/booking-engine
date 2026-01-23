@@ -1,129 +1,353 @@
-## 1. **HTTP Headers Protection**
+Nice, this is a solid baseline 👍
+Given how **production-grade** your data model and booking flow already are, I’d recommend **upgrading this security doc slightly** so it aligns with:
 
-- Use `helmet` middleware to secure HTTP headers against common attacks (clickjacking, XSS, MIME sniffing).
-- Key settings:
-  - `X-Frame-Options` → prevent clickjacking
-  - `X-XSS-Protection` → prevent some XSS attacks
-  - `Content-Security-Policy` → control sources for scripts, images, and styles
-  - `Strict-Transport-Security` → enforce HTTPS
+* JWT + stateless APIs
+* Idempotency
+* Audit logging
+* Financial integrity
+* “No queues, but still safe” philosophy
 
-**Package:** `helmet`
-
----
-
-## 2. **CORS (Cross-Origin Resource Sharing)**
-
-- Only allow trusted domains to access your API.
-- Restrict HTTP methods to what is necessary (GET, POST, PUT, DELETE).
-- Disable credentials unless necessary.
-
-**Package:** `cors`
+Below is an **improved, v1-ready update** you can directly replace `booking_engine_security.md` with.
+I’ll keep it **practical, not academic**.
 
 ---
 
-## 3. **Rate Limiting / Brute Force Protection**
+# Booking Engine – Security Architecture (v1)
 
-- Prevent abuse like login attempts, booking spamming, or payment attempts.
-- Set limits per IP or per user account.
-- Return HTTP 429 when limits are exceeded.
-
-**Package:** `express-rate-limit`
+This document defines the security controls for the Booking Engine backend.
+The system prioritizes **data integrity, financial correctness, and auditability** over extreme scale.
 
 ---
 
-## 4. **Data Validation / Input Sanitization**
+## 1. HTTP Headers Protection
 
-- Validate all incoming data (body, query, params) to prevent SQL injection or malformed data.
-- Sanitize strings to prevent XSS.
+Use `helmet` to protect against common web vulnerabilities.
 
-**Packages:** `express-validator`, `xss-clean`
+**Enabled protections**
 
----
+* `X-Frame-Options` → Prevent clickjacking
+* `Content-Security-Policy` → Restrict script/image sources
+* `X-Content-Type-Options` → Prevent MIME sniffing
+* `Strict-Transport-Security (HSTS)` → Enforce HTTPS
+* `Referrer-Policy`
 
-## 5. **Cross-Site Request Forgery (CSRF)**
+**Notes**
 
-- For any web-based frontend, protect state-changing endpoints (POST/PUT/DELETE) from CSRF.
-- Issue CSRF tokens in forms or headers.
+* `X-XSS-Protection` is deprecated in modern browsers and can be disabled
+* CSP should be **relaxed for APIs** (no inline scripts required)
 
-**Package:** `csurf`
+**Package**
 
----
-
-## 6. **Authentication & Authorization**
-
-- Use JWT or session tokens for API authentication.
-- Store passwords securely using hashing (`bcrypt`) with strong salt.
-- Enforce 2FA for admin or sensitive users.
-- Check permissions on **every API** with middleware (role → permissions).
-
-**Packages:** `jsonwebtoken`, `bcrypt`
+* `helmet`
 
 ---
 
-## 7. **HTTPS / Transport Security**
+## 2. CORS (Cross-Origin Resource Sharing)
 
-- Enforce HTTPS for all endpoints.
-- Redirect HTTP to HTTPS.
-- Consider HSTS header to enforce HTTPS on client side (`helmet` can handle this).
+Restrict API access to trusted origins.
 
----
+**Rules**
 
-## 8. **Logging & Monitoring**
+* Allow only explicitly configured domains
+* Restrict methods to:
 
-- Log security events (failed logins, permission denials, payment failures).
-- Monitor for abnormal traffic or repeated failed login attempts.
+  * `GET`, `POST`, `PUT`, `PATCH`, `DELETE`
+* Disallow credentials by default
+* Allow credentials only for admin dashboards if required
 
-**Packages:** `winston`, `morgan`
+**Package**
 
----
-
-## 9. **Error Handling / Information Leakage**
-
-- Do not expose stack traces or detailed DB errors to clients.
-- Return generic error messages like `403 Forbidden` or `500 Internal Server Error`.
+* `cors`
 
 ---
 
-## 10. **Database Security**
+## 3. Rate Limiting & Abuse Protection
 
-- Use parameterized queries (Prisma already handles this).
-- Limit database user privileges: separate read-only vs write access.
-- Enable SSL connections to DB.
+Protect against:
+
+* Login brute force
+* Booking spam
+* Payment retry abuse
+
+**Strategies**
+
+* Global IP-based rate limiting
+* Stricter limits for:
+
+  * `/auth/login`
+  * `/bookings`
+  * `/payments`
+* Combine with account-level throttling using:
+
+  * `failed_login_attempts`
+  * `locked_until`
+
+**Responses**
+
+* HTTP `429 Too Many Requests`
+* Do not leak rate limit configuration details
+
+**Package**
+
+* `express-rate-limit`
 
 ---
 
-## 11. **Session Security (if sessions used)**
+## 4. Input Validation & Sanitization
 
-- Set secure, HTTP-only cookies.
-- Enable `SameSite` attribute to prevent CSRF.
+All external input must be validated.
+
+**Rules**
+
+* Validate:
+
+  * Request body
+  * Query params
+  * Path params
+* Reject unknown fields (fail closed)
+* Sanitize strings to prevent XSS
+
+**Important**
+
+* Prisma protects against SQL injection
+* Validation is still required for:
+
+  * Business rules
+  * Type safety
+  * Security boundaries
+
+**Packages**
+
+* `joi` (preferred for schema validation)
+* `xss-clean`
 
 ---
 
-## 12. **File Uploads (if any)**
+## 5. Authentication
 
-- Validate file types and sizes.
-- Store files outside web root.
-- Scan for malware if necessary.
+### JWT-based Authentication
+
+* Use short-lived JWT access tokens
+* Store user_id, role_id, token_version
+* Validate token on every protected request
+
+**Rules**
+
+* Tokens are rejected if:
+
+  * User is inactive
+  * Role is inactive
+  * Account is locked
+* Token invalidation on:
+
+  * Password reset
+  * Role change
+  * User deactivation
+
+**Packages**
+
+* `jsonwebtoken`
+* `bcrypt`
 
 ---
 
-## 13. **Backup & Recovery Security**
+## 6. Authorization (RBAC)
 
-- Encrypt backups at rest.
-- Limit access to backup storage.
+All protected APIs must enforce permission checks.
+
+**Model**
+
+* User → Role → Permissions
+* Permissions are immutable identifiers
+* Authorization is enforced via middleware
+
+**Rules**
+
+* No permission = no access
+* Object-level checks enforced where applicable:
+
+  * Booking ownership
+  * Hotel ownership
+* Permission failures return:
+
+  * `403 Forbidden`
 
 ---
 
-✅ **Recommended Stack of Packages in Node.js / Express**
+## 7. Idempotency Protection (Critical)
 
-- `helmet` → HTTP headers protection
-- `cors` → CORS control
-- `express-rate-limit` → rate limiting
-- `xss-clean` → XSS sanitization
-- `express-validator` → input validation
-- `csurf` → CSRF protection
-- `bcrypt` → password hashing
-- `jsonwebtoken` → JWT authentication
-- `morgan` / `winston` → logging & monitoring
+Prevent duplicate execution of critical operations.
+
+**Protected Operations**
+
+* Booking creation
+* Payment initiation
+* Refund initiation
+
+**Implementation**
+
+* Client must send `Idempotency-Key` header
+* Server:
+
+  1. Locks key + scope
+  2. Rejects conflicting payloads
+  3. Returns stored response for retries
+
+**Backed by**
+
+* `IdempotencyKey` table
+
+---
+
+## 8. Transactional Integrity
+
+All critical flows run inside DB transactions.
+
+**Examples**
+
+* Booking creation:
+
+  * Lock RoomAvailability
+  * Calculate pricing
+  * Persist booking
+* Payments:
+
+  * Create payment
+  * Update booking payment status
+  * Create transaction ledger entry
+
+**Rules**
+
+* No partial writes
+* Either fully committed or rolled back
+* Prisma `$transaction()` is mandatory
+
+---
+
+## 9. Logging & Monitoring
+
+### Application Logs
+
+* Request lifecycle
+* Errors
+* Performance timings
+
+### Security Logs
+
+* Failed logins
+* Permission denials
+* Payment & refund failures
+
+**Packages**
+
+* `morgan` → HTTP access logs
+* `winston` → structured application logs
+
+---
+
+## 10. Audit Logging (Mandatory)
+
+All state-changing actions must be auditable.
+
+**Tracked Events**
+
+* Booking lifecycle changes
+* Payment & refund actions
+* User management
+* Permission denials
+
+**Implementation**
+
+* Use `AuditLog` table
+* Logs are:
+
+  * Immutable
+  * Append-only
+  * Best-effort (must not block business logic)
+
+---
+
+## 11. Error Handling & Information Leakage
+
+**Rules**
+
+* Never expose:
+
+  * Stack traces
+  * SQL errors
+  * Internal identifiers
+* Use generic error messages:
+
+  * `400 Bad Request`
+  * `401 Unauthorized`
+  * `403 Forbidden`
+  * `500 Internal Server Error`
+
+**Detailed errors**
+
+* Logged internally
+* Never returned to clients
+
+---
+
+## 12. Database Security
+
+**Practices**
+
+* Prisma parameterized queries
+* Least-privilege DB users:
+
+  * App user
+  * Read-only user (optional)
+* SSL enforced for DB connections
+* Backups encrypted at rest
+
+---
+
+## 13. File Upload Security (If Enabled)
+
+**Rules**
+
+* Validate:
+
+  * MIME type
+  * File size
+* Store outside web root
+* Generate signed URLs for access
+* Optional malware scanning
+
+---
+
+## 14. Backup & Recovery Security
+
+* Encrypted backups
+* Restricted access
+* Regular restore tests
+* Backup access audited
+
+---
+
+## 15. What Is Explicitly Out of Scope (v1)
+
+* Message queues
+* Distributed locks
+* Web Application Firewall (WAF)
+* Advanced fraud detection
+
+These can be added later without breaking architecture.
+
+---
+
+## Recommended Security Stack
+
+* `helmet`
+* `cors`
+* `express-rate-limit`
+* `joi`
+* `xss-clean`
+* `bcrypt`
+* `jsonwebtoken`
+* `morgan`
+* `winston`
 
 ---

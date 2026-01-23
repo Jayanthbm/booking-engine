@@ -130,7 +130,7 @@ Allows users to search room availability based on selected dates, view pricing, 
 - Constraints / Rules
   - username should be unique
   - email must be unique
-  - mobile and email combined should be unique
+  - mobile should be unique
   - Users cannot delete themselves
   - Inactive users cannot log in
   - Users assigned to inactive roles cannot log in
@@ -591,7 +591,7 @@ Allows users to search room availability based on selected dates, view pricing, 
       - Room is inactive
   - Availability records are append-safe:
       - Never deleted once used
-      - Freed by setting is_booked = false
+      - Records are never deleted; state is toggled to preserve history.
   - RoomAvailability must not be modified outside a transaction
 
 ### Entity: Booking
@@ -635,9 +635,9 @@ Allows users to search room availability based on selected dates, view pricing, 
   - room_price_total → total room price after dynamic pricing
   - hotel_addons_total → total hotel add-ons price
   - activity_addons_total → total activity add-ons price
+  - subtotal_price → price before tax
   - tax_total → total tax applied
   - total_discount → total discount applied
-  - total_price → final price after discount
   - total_price → final payable amount
   - price_breakdown → JSON (Stores full calculation trace)
 
@@ -672,7 +672,9 @@ Allows users to search room availability based on selected dates, view pricing, 
   - Cancel booking:
       - Updates status
       - Frees RoomAvailability
-      - Applies CancellationPolicy
+      - Refund calculation:
+          - Manual in v1
+          - Policy-based in future versions
       - Initiates refunds if needed
   - Complete booking:
       - Marks stay finished
@@ -856,6 +858,7 @@ Allows users to search room availability based on selected dates, view pricing, 
       - Negative for outgoing money
   - currency → string
       - Should match Booking currency
+      - currency is immutable once set
   - transaction_date → timestamp
       - Time the transaction is recorded
 
@@ -1118,3 +1121,6 @@ Allows users to search room availability based on selected dates, view pricing, 
 
   - Notification failure:
     - Must not block core business logic
+
+- Constraints / Rules
+    - Notifications are best-effort and may be retried asynchronously.

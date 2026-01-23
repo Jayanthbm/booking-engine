@@ -1,0 +1,83 @@
+enum BookingStatus {
+  Pending
+  Confirmed
+  Cancelled
+  Completed
+}
+
+enum BookingPaymentStatus {
+  Pending
+  PartiallyPaid
+  FullyPaid
+  Refunded
+}
+
+enum PaymentStatus {
+  Pending
+  Completed
+  Failed
+}
+
+enum PaymentMode {
+  Cash
+  Card
+  UPI
+  Wallet
+  BankTransfer
+  Other
+}
+
+enum RoomStatus {
+  Available
+  Maintenance
+  OutOfService
+}
+
+enum BookedBy {
+  Guest
+  Receptionist
+}
+
+enum TransactionType {
+  Payment
+  Refund
+  Adjustment
+}
+
+enum PricingEntityType {
+  RoomType
+  HotelAddOn
+  ActivityAddOn
+}
+
+enum TaxType {
+  Percentage
+  Fixed
+}
+
+enum TaxApplicableOn {
+  Room
+  HotelAddOn
+  ActivityAddOn
+  Total
+}
+
+enum IdempotencyScope {
+  Booking
+  Payment
+  Refund
+}
+
+enum NotificationChannel {
+  Email
+  SMS
+  Push
+  Whatsapp
+  Telegram
+}
+
+enum NotificationStatus {
+  Pending
+  Sent
+  Failed
+}

@@ -1,0 +1,19 @@
+model Transaction {
+  id              Int             @id @default(autoincrement())
+  bookingId       Int?
+  paymentId       Int?
+  refundId        Int?
+  transactionType TransactionType
+  amount          Decimal
+  currency        String
+  transactionDate DateTime        @default(now())
+  notes           String?
+
+  createdAt       DateTime        @default(now())
+
+
+  @@index([bookingId])
+  @@index([paymentId])
+  @@index([refundId])
+  @@index([transactionType])
+}

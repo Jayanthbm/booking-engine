@@ -1,0 +1,18 @@
+model DynamicPricing {
+  id         Int               @id @default(autoincrement())
+  entityType PricingEntityType
+  entityId   Int
+  startDate  DateTime
+  endDate    DateTime
+  price      Decimal
+  priority   Int               @default(0)
+  isActive   Boolean           @default(true)
+  notes      String?
+
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([entityType, entityId])
+  @@index([startDate, endDate])
+  @@index([isActive])
+}

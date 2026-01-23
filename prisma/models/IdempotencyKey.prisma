@@ -1,0 +1,17 @@
+model IdempotencyKey {
+  id               Int               @id @default(autoincrement())
+  key              String
+  scope            IdempotencyScope
+  requestHash      String
+  responseSnapshot Json?
+  status           String
+  resourceId       Int?
+  expiresAt        DateTime
+
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@unique([key, scope])
+  @@index([status])
+  @@index([expiresAt])
+}

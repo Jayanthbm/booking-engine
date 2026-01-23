@@ -1,0 +1,35 @@
+// enums
+import "./enums.prisma"
+
+// RBAC
+import "./Permission.prisma"
+import "./Role.prisma"
+import "./RolePermission.prisma"
+import "./User.prisma"
+
+// Core domain
+import "./Hotel.prisma"
+import "./RoomType.prisma"
+import "./Room.prisma"
+import "./RoomAvailability.prisma"
+
+// Add-ons
+import "./HotelAddon.prisma"
+import "./ActivityAddon.prisma"
+
+// Pricing
+import "./DynamicPricing.prisma"
+import "./AgeBasedPricing.prisma"
+
+// Booking
+import "./Booking.prisma"
+
+// Finance
+import "./Payment.prisma"
+import "./Refund.prisma"
+import "./Transaction.prisma"
+
+// System / infra
+import "./IdempotencyKey.prisma"
+import "./AuditLog.prisma"
+import "./Notification.prisma"

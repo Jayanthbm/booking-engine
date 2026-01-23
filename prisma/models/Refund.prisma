@@ -1,0 +1,15 @@
+model Refund {
+  id                 Int           @id @default(autoincrement())
+  paymentId          Int
+  amount             Decimal
+  status             PaymentStatus @default(Pending)
+  refundDate         DateTime?
+  reason             String?
+  refundTransactionId String?
+  gatewayResponse    Json?
+
+  payment            Payment       @relation(fields: [paymentId], references: [id])
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}

@@ -1,0 +1,20 @@
+model HotelAddon {
+  id          Int       @id @default(autoincrement())
+  hotelId    Int
+  roomTypeId Int?
+  name        String
+  description String?
+  basePrice   Decimal
+  perGuest    Boolean   @default(false)
+  maxQuantity Int?
+  isActive    Boolean   @default(true)
+  images      String[]
+
+  hotel       Hotel     @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  roomType    RoomType? @relation(fields: [roomTypeId], references: [id])
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([hotelId, name])
+}

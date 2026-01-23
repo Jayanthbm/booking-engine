@@ -1,0 +1,16 @@
+model RoomAvailability {
+  id        Int      @id @default(autoincrement())
+  roomId    Int
+  date      DateTime
+  isBooked  Boolean @default(false)
+  bookingId Int?
+
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, date])
+  @@index([date])
+  @@index([roomId, isBooked])
+}

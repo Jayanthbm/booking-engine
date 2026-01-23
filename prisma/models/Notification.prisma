@@ -1,0 +1,24 @@
+model Notification {
+  id                Int                 @id @default(autoincrement())
+  recipientType     String
+  recipientUserId   Int?
+  recipientEmail    String?
+  recipientPhone    String?
+  channel           NotificationChannel
+  templateKey       String?
+  title             String?
+  message           String
+  payload           Json?
+  status            NotificationStatus  @default(Pending)
+  retryCount        Int                 @default(0)
+  lastAttemptAt     DateTime?
+  entityType        String?
+  entityId          Int?
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt])
+}
